@@ -10,6 +10,7 @@ import (
 var (
 	StateWatchedLists   = event.Type{Type: "fi.mau.meowlnir.watched_lists", Class: event.StateEventType}
 	StateProtectedRooms = event.Type{Type: "fi.mau.meowlnir.protected_rooms", Class: event.StateEventType}
+	StateProtections    = event.Type{Type: "fi.mau.meowlnir.protections", Class: event.StateEventType}
 )
 
 type WatchedPolicyList struct {

@@ -35,4 +35,23 @@ func (pe *PolicyEvaluator) HandleMessage(ctx context.Context, evt *event.Event) 
 			&bot.SendNoticeOpts{Mentions: &event.Mentions{Room: true}, SendAsText: true},
 		)
 	}
+
+	if pe.protections != nil {
+		if pe.protections.Global != nil {
+			for _, protection := range *pe.protections.Global {
+				if protection.IsEnabled() {
+					protection.Callback(ctx, pe.Bot.Client, evt)
+				}
+			}
+		}
+		if pe.protections.Overrides != nil {
+			if protection, ok := pe.protections.Overrides[evt.RoomID]; ok {
+				for _, p := range *protection {
+					if p.IsEnabled() {
+						p.Callback(ctx, pe.Bot.Client, evt)
+					}
+				}
+			}
+		}
+	}
 }

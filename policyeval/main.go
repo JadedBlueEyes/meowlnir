@@ -58,6 +58,8 @@ type PolicyEvaluator struct {
 	AutoRejectInvites  bool
 	FilterLocalInvites bool
 	createPuppetClient func(userID id.UserID) *mautrix.Client
+
+	protections *Protections
 }
 
 func NewPolicyEvaluator(
@@ -139,6 +141,12 @@ func (pe *PolicyEvaluator) tryLoad(ctx context.Context) error {
 		zerolog.Ctx(ctx).Info().Msg("No protected rooms event found in management room")
 	} else {
 		_, errorMsgs := pe.handleProtectedRooms(ctx, evt, true)
+		errors = append(errors, errorMsgs...)
+	}
+	if evt, ok := state[config.StateProtections][""]; !ok {
+		zerolog.Ctx(ctx).Info().Msg("No protections event found in management room")
+	} else {
+		_, errorMsgs := pe.handleProtections(evt)
 		errors = append(errors, errorMsgs...)
 	}
 	initDuration := time.Since(start)
