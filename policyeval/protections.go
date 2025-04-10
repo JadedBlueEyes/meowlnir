@@ -2,73 +2,73 @@ package policyeval
 
 import (
 	"context"
+	"slices"
+	"strings"
+
+	"github.com/rs/zerolog/log"
+
+	"go.mau.fi/meowlnir/config"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/id"
 )
 
-type ProtectionConfig map[string]IProtection
-
-type Protections struct {
-	Global    *ProtectionConfig               `json:"global,omitempty"`
-	Overrides map[id.RoomID]*ProtectionConfig `json:"overrides,omitempty"`
-}
-
-type IProtection interface {
-	IsEnabled() bool
-	Callback(ctx context.Context, client *mautrix.Client, evt *event.Event)
-}
-
-type NoMediaProtection struct {
-	Enabled     bool `json:"enabled"`
-	AllowImages bool `json:"allow_images"`
-	AllowVideos bool `json:"allow_videos"`
-	AllowFiles  bool `json:"allow_files"`
-	AllowAudio  bool `json:"allow_audio"`
-}
-
-func (p *NoMediaProtection) IsEnabled() bool {
-	// Master toggle + at least one disallowed media type
-	return p.Enabled && !(p.AllowImages && p.AllowVideos && p.AllowFiles && p.AllowAudio)
-}
-
-func (p *NoMediaProtection) Callback(ctx context.Context, client *mautrix.Client, evt *event.Event) {
+func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *event.Event, p *config.NoMediaProtection) {
 	// The room constraints and enabled-ness of the protection are already checked before this callback is called.
-	if evt.Type != event.EventMessage {
+	protectionLog := zerolog.Ctx(ctx).With().
+		Str("protection", "no_media").
+		Stringer("room", evt.RoomID).
+		Stringer("event", evt.ID).
+		Stringer("sender", evt.Sender).
+		Logger()
+	powerLevels, err := client.StateStore.GetPowerLevels(ctx, evt.RoomID)
+	if err != nil {
+		protectionLog.Warn().Err(err).Msg("Failed to get power levels")
 		return
 	}
+	userPL, ok := powerLevels.Users[evt.Sender]
+	if !ok {
+		userPL = powerLevels.UsersDefault
+		protectionLog.Debug().Msg("Failed to find user, defaulted power level")
+	}
+	if int64(userPL) > p.IgnorePL {
+		protectionLog.Debug().
+			Int("user_power_level", userPL).
+			Int64("ignore_power_level", p.IgnorePL).
+			Msg("Ignoring message from user with sufficient power level")
+		return
+	}
+
 	shouldRedact := false
-	content := evt.Content.AsMessage()
-	switch content.MsgType {
-	case event.MsgImage:
-		if !p.AllowImages {
+
+	if evt.Type == event.EventReaction && !p.AllowCustomReactions {
+		if strings.HasPrefix(evt.Content.AsReaction().GetRelatesTo().Key, "mxc://") {
 			shouldRedact = true
 		}
-	case event.MsgVideo:
-		if !p.AllowVideos {
-			shouldRedact = true
+	} else {
+		var msgType string
+		var msgContent *event.MessageEventContent
+		if evt.Type == event.EventSticker {
+			msgType = "m.sticker"
+		} else {
+			msgContent = evt.Content.AsMessage()
+			msgType = string(msgContent.MsgType)
 		}
-	case event.MsgFile:
-		if !p.AllowFiles {
-			shouldRedact = true
-		}
-	case event.MsgAudio:
-		if !p.AllowAudio {
-			shouldRedact = true
+		shouldRedact = !slices.Contains(p.AllowedTypes, msgType) && len(p.AllowedTypes) > 0
+		if msgContent != nil && !p.AllowInlineImages {
+			// Lazy, but check for <img> tags in the body.
+			if strings.Contains(msgContent.FormattedBody, "<img") {
+				shouldRedact = true
+			}
 		}
 	}
 
 	if shouldRedact {
 		if _, err := client.RedactEvent(ctx, evt.RoomID, evt.ID); err != nil {
-			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to redact media message")
+			protectionLog.Err(err).Msg("Failed to redact message")
 		} else {
-			zerolog.Ctx(ctx).Info().
-				Stringer("room", evt.RoomID).
-				Stringer("event", evt.ID).
-				Stringer("sender", evt.Sender).
-				Msg("Redacted media message")
+			protectionLog.Info().Msg("Redacted message")
 		}
 	}
 }
@@ -76,7 +76,15 @@ func (p *NoMediaProtection) Callback(ctx context.Context, client *mautrix.Client
 func (pe *PolicyEvaluator) handleProtections(
 	evt *event.Event,
 ) (output, errors []string) {
-	content, ok := evt.Content.Parsed.(*Protections)
+	log.Warn().Interface("evt", evt).Msg("Received protection event")
+	if evt.Content.Parsed == nil {
+		if err := evt.Content.ParseRaw(config.StateProtections); err != nil {
+			log.Error().Err(err).Msg("Failed to parse protections")
+			errors = append(errors, "failed to parse protections")
+			return
+		}
+	}
+	content, ok := evt.Content.Parsed.(*config.StateProtectionsEventContent)
 	if !ok {
 		errors = append(errors, "failed to parse protections")
 		return

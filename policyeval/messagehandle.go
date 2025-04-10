@@ -37,21 +37,26 @@ func (pe *PolicyEvaluator) HandleMessage(ctx context.Context, evt *event.Event) 
 	}
 
 	if pe.protections != nil {
-		if pe.protections.Global != nil {
-			for _, protection := range *pe.protections.Global {
-				if protection.IsEnabled() {
-					protection.Callback(ctx, pe.Bot.Client, evt)
-				}
-			}
+		cfg := pe.protections.Global
+		override, hasOverride := pe.protections.Overrides[evt.RoomID]
+		if hasOverride {
+			cfg = override
 		}
-		if pe.protections.Overrides != nil {
-			if protection, ok := pe.protections.Overrides[evt.RoomID]; ok {
-				for _, p := range *protection {
-					if p.IsEnabled() {
-						p.Callback(ctx, pe.Bot.Client, evt)
-					}
-				}
-			}
+		if cfg.NoMedia.Enabled {
+			MediaProtectionCallback(ctx, pe.Bot.Client, evt, &cfg.NoMedia)
+		}
+	}
+}
+
+func (pe *PolicyEvaluator) HandleReaction(ctx context.Context, evt *event.Event) {
+	if pe.protections != nil {
+		cfg := pe.protections.Global
+		override, hasOverride := pe.protections.Overrides[evt.RoomID]
+		if hasOverride {
+			cfg = override
+		}
+		if cfg.NoMedia.Enabled {
+			MediaProtectionCallback(ctx, pe.Bot.Client, evt, &cfg.NoMedia)
 		}
 	}
 }

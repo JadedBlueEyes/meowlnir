@@ -28,6 +28,10 @@ func (pe *PolicyEvaluator) HandleConfigChange(ctx context.Context, evt *event.Ev
 		successMsgs, errorMsgs := pe.handleProtectedRooms(ctx, evt, false)
 		successMsg = strings.Join(successMsgs, "\n")
 		errorMsg = strings.Join(errorMsgs, "\n")
+	case config.StateProtections:
+		successMsgs, errorMsgs := pe.handleProtections(evt)
+		successMsg = strings.Join(successMsgs, "\n")
+		errorMsg = strings.Join(errorMsgs, "\n")
 	}
 	var output string
 	if successMsg != "" {

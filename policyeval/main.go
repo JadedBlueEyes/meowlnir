@@ -59,7 +59,7 @@ type PolicyEvaluator struct {
 	FilterLocalInvites bool
 	createPuppetClient func(userID id.UserID) *mautrix.Client
 
-	protections *Protections
+	protections *config.StateProtectionsEventContent
 }
 
 func NewPolicyEvaluator(

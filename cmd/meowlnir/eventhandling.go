@@ -49,6 +49,7 @@ func (m *Meowlnir) AddEventHandlers() {
 	m.EventProcessor.On(event.StateMember, m.HandleMember)
 	m.EventProcessor.On(event.EventMessage, m.HandleMessage)
 	m.EventProcessor.On(event.EventSticker, m.HandleMessage)
+	m.EventProcessor.On(event.EventReaction, m.HandleReaction)
 	m.EventProcessor.On(event.EventEncrypted, m.HandleEncrypted)
 }
 
@@ -168,5 +169,22 @@ func (m *Meowlnir) HandleMessage(ctx context.Context, evt *event.Event) {
 		}
 	} else if isProtected {
 		roomProtector.HandleMessage(ctx, evt)
+	}
+}
+
+func (m *Meowlnir) HandleReaction(ctx context.Context, evt *event.Event) {
+	_, ok := evt.Content.Parsed.(*event.ReactionEventContent)
+	if !ok {
+		return
+	}
+	m.MapLock.RLock()
+	_, isBot := m.Bots[evt.Sender]
+	roomProtector, isProtected := m.EvaluatorByProtectedRoom[evt.RoomID]
+	m.MapLock.RUnlock()
+	if isBot {
+		return
+	}
+	if isProtected {
+		roomProtector.HandleReaction(ctx, evt)
 	}
 }

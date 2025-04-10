@@ -33,7 +33,26 @@ type ProtectedRoomsEventContent struct {
 	SkipACL []id.RoomID `json:"skip_acl"`
 }
 
+type StateProtectionsEventContent struct {
+	Global    Protections               `json:"global"`
+	Overrides map[id.RoomID]Protections `json:"overrides"`
+}
+
+type Protections struct {
+	NoMedia            NoMediaProtection `json:"no_media"`
+	IgnoreAfterSeconds int64             `json:"ignore_after_seconds"`
+}
+
+type NoMediaProtection struct {
+	Enabled              bool     `json:"enabled"`
+	IgnorePL             int64    `json:"ignore_power_level"`
+	AllowedTypes         []string `json:"allowed_types"`
+	AllowInlineImages    bool     `json:"allow_inline_images"`
+	AllowCustomReactions bool     `json:"allow_custom_reactions"`
+}
+
 func init() {
 	event.TypeMap[StateWatchedLists] = reflect.TypeOf(WatchedListsEventContent{})
 	event.TypeMap[StateProtectedRooms] = reflect.TypeOf(ProtectedRoomsEventContent{})
+	event.TypeMap[StateProtections] = reflect.TypeOf(StateProtectionsEventContent{})
 }
