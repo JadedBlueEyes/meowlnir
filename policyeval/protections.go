@@ -5,8 +5,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/rs/zerolog/log"
-
 	"go.mau.fi/meowlnir/config"
 
 	"github.com/rs/zerolog"
@@ -76,10 +74,8 @@ func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *e
 func (pe *PolicyEvaluator) handleProtections(
 	evt *event.Event,
 ) (output, errors []string) {
-	log.Warn().Interface("evt", evt).Msg("Received protection event")
 	if evt.Content.Parsed == nil {
 		if err := evt.Content.ParseRaw(config.StateProtections); err != nil {
-			log.Error().Err(err).Msg("Failed to parse protections")
 			errors = append(errors, "failed to parse protections")
 			return
 		}
@@ -89,6 +85,9 @@ func (pe *PolicyEvaluator) handleProtections(
 		errors = append(errors, "failed to parse protections")
 		return
 	}
+	//current := pe.protections
 	pe.protections = content
+	// TODO: Diff changes(?)
+	output = append(output, "Protections updated")
 	return
 }
