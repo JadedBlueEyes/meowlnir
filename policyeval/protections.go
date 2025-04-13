@@ -22,19 +22,9 @@ func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *e
 		Logger()
 	powerLevels, err := client.StateStore.GetPowerLevels(ctx, evt.RoomID)
 	if err != nil {
-		protectionLog.Warn().Err(err).Msg("Failed to get power levels")
-		return
+		protectionLog.Warn().Err(err).Msg("Failed to get power levels!")
 	}
-	userPL, ok := powerLevels.Users[evt.Sender]
-	if !ok {
-		userPL = powerLevels.UsersDefault
-		protectionLog.Debug().Msg("Failed to find user, defaulted power level")
-	}
-	if int64(userPL) > p.IgnorePL {
-		protectionLog.Debug().
-			Int("user_power_level", userPL).
-			Int64("ignore_power_level", p.IgnorePL).
-			Msg("Ignoring message from user with sufficient power level")
+	if p.UserCanBypass(evt.Sender, powerLevels) {
 		return
 	}
 
@@ -47,12 +37,16 @@ func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *e
 	} else {
 		var msgType string
 		var msgContent *event.MessageEventContent
+
 		if evt.Type == event.EventSticker {
 			msgType = "m.sticker"
+			// m.sticker is actually an event type, not message type. But, for all intents
+			// and purposes, it's basically just m.image, and here we'll treat it as such
 		} else {
 			msgContent = evt.Content.AsMessage()
 			msgType = string(msgContent.MsgType)
 		}
+
 		shouldRedact = !slices.Contains(p.AllowedTypes, msgType) && len(p.AllowedTypes) > 0
 		if msgContent != nil && !p.AllowInlineImages {
 			// Lazy, but check for <img> tags in the body.

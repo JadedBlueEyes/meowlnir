@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"slices"
 
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -44,11 +45,28 @@ type Protections struct {
 }
 
 type NoMediaProtection struct {
-	Enabled              bool     `json:"enabled"`
-	IgnorePL             int64    `json:"ignore_power_level"`
-	AllowedTypes         []string `json:"allowed_types"`
-	AllowInlineImages    bool     `json:"allow_inline_images"`
-	AllowCustomReactions bool     `json:"allow_custom_reactions"`
+	Enabled               bool     `json:"enabled"`
+	IgnoreHomeServers     []string `json:"ignore_home_servers"`
+	IgnoreAbovePowerLevel int64    `json:"ignore_power_level_above"`
+	AllowedTypes          []string `json:"allowed_types"`
+	AllowInlineImages     bool     `json:"allow_inline_images"`
+	AllowCustomReactions  bool     `json:"allow_custom_reactions"`
+}
+
+func (p *NoMediaProtection) UserCanBypass(userID id.UserID, powerLevels *event.PowerLevelsEventContent) bool {
+	if len(p.IgnoreHomeServers) > 0 && slices.Contains(p.IgnoreHomeServers, userID.Homeserver()) {
+		return true
+	}
+	if powerLevels != nil {
+		userPL, ok := powerLevels.Users[userID]
+		if !ok {
+			userPL = powerLevels.UsersDefault
+		}
+		if int64(userPL) > p.IgnoreAbovePowerLevel {
+			return true
+		}
+	}
+	return false
 }
 
 func init() {
