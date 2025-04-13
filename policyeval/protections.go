@@ -65,6 +65,8 @@ func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *e
 	}
 }
 
+// TODO: Link protection callback
+
 func (pe *PolicyEvaluator) handleProtections(
 	evt *event.Event,
 ) (output, errors []string) {

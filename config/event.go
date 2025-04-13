@@ -44,6 +44,12 @@ type Protections struct {
 	IgnoreAfterSeconds int64             `json:"ignore_after_seconds"`
 }
 
+// TODO: perhaps some union type for UserCanBypass for common fields like enabled, ignorehomeservers, ignoreabovepl
+// The granularity of having it configurable per-protection is great for allowing fine-grained control over the
+// protections, but is resulting in a lot of repeated code chunks and boilerplate.
+// Might be worth using an interface to define some common fields and functions for HandleMessage & co to call.
+// Should also hopefully prevent an ugly if/else or switch/match statement chain
+
 type NoMediaProtection struct {
 	Enabled               bool     `json:"enabled"`
 	IgnoreHomeServers     []string `json:"ignore_home_servers"`
@@ -54,6 +60,28 @@ type NoMediaProtection struct {
 }
 
 func (p *NoMediaProtection) UserCanBypass(userID id.UserID, powerLevels *event.PowerLevelsEventContent) bool {
+	if len(p.IgnoreHomeServers) > 0 && slices.Contains(p.IgnoreHomeServers, userID.Homeserver()) {
+		return true
+	}
+	if powerLevels != nil {
+		userPL, ok := powerLevels.Users[userID]
+		if !ok {
+			userPL = powerLevels.UsersDefault
+		}
+		if int64(userPL) > p.IgnoreAbovePowerLevel {
+			return true
+		}
+	}
+	return false
+}
+
+type NoLinksProtection struct {
+	Enabled               bool     `json:"enabled"`
+	IgnoreHomeServers     []string `json:"ignore_home_servers"`
+	IgnoreAbovePowerLevel int64    `json:"ignore_power_level_above"`
+}
+
+func (p *NoLinksProtection) UserCanBypass(userID id.UserID, powerLevels *event.PowerLevelsEventContent) bool {
 	if len(p.IgnoreHomeServers) > 0 && slices.Contains(p.IgnoreHomeServers, userID.Homeserver()) {
 		return true
 	}
