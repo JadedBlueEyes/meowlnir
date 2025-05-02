@@ -25,6 +25,7 @@ func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *e
 		protectionLog.Warn().Err(err).Msg("Failed to get power levels!")
 	}
 	if p.UserCanBypass(evt.Sender, powerLevels) {
+		protectionLog.Trace().Msg("User can bypass media protection")
 		return
 	}
 
@@ -62,6 +63,8 @@ func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *e
 		} else {
 			protectionLog.Info().Msg("Redacted message")
 		}
+	} else {
+		protectionLog.Trace().Msg("Message is allowed")
 	}
 }
 
