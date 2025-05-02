@@ -9,7 +9,9 @@ import (
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/exsync"
+	"go.mau.fi/util/glob"
 	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/commands"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
@@ -36,6 +38,9 @@ type PolicyEvaluator struct {
 	ManagementRoom id.RoomID
 	Admins         *exsync.Set[id.UserID]
 
+	commandProcessor *commands.Processor[*PolicyEvaluator]
+
+	watchedListsEvent   *config.WatchedListsEventContent
 	watchedListsMap     map[id.RoomID]*config.WatchedPolicyList
 	watchedListsList    []id.RoomID
 	watchedListsForACLs []id.RoomID
@@ -45,6 +50,7 @@ type PolicyEvaluator struct {
 	aclLock    sync.Mutex
 
 	claimProtected       func(roomID id.RoomID, eval *PolicyEvaluator, claim bool) *PolicyEvaluator
+	protectedRoomsEvent  *config.ProtectedRoomsEventContent
 	protectedRooms       map[id.RoomID]*protectedRoomMeta
 	wantToProtect        map[id.RoomID]struct{}
 	isJoining            map[id.RoomID]struct{}
@@ -58,6 +64,7 @@ type PolicyEvaluator struct {
 	AutoRejectInvites  bool
 	FilterLocalInvites bool
 	createPuppetClient func(userID id.UserID) *mautrix.Client
+	autoRedactPatterns []glob.Glob
 
 	protections *config.StateProtectionsEventContent
 }
@@ -71,6 +78,7 @@ func NewPolicyEvaluator(
 	claimProtected func(roomID id.RoomID, eval *PolicyEvaluator, claim bool) *PolicyEvaluator,
 	createPuppetClient func(userID id.UserID) *mautrix.Client,
 	autoRejectInvites, filterLocalInvites, dryRun bool,
+	hackyAutoRedactPatterns []glob.Glob,
 ) *PolicyEvaluator {
 	pe := &PolicyEvaluator{
 		Bot:                  bot,
@@ -79,6 +87,7 @@ func NewPolicyEvaluator(
 		Store:                store,
 		ManagementRoom:       managementRoom,
 		Admins:               exsync.NewSet[id.UserID](),
+		commandProcessor:     commands.NewProcessor[*PolicyEvaluator](bot.Client),
 		protectedRoomMembers: make(map[id.UserID][]id.RoomID),
 		memberHashes:         make(map[[32]byte]id.UserID),
 		watchedListsMap:      make(map[id.RoomID]*config.WatchedPolicyList),
@@ -91,19 +100,38 @@ func NewPolicyEvaluator(
 		AutoRejectInvites:    autoRejectInvites,
 		FilterLocalInvites:   filterLocalInvites,
 		DryRun:               dryRun,
+		autoRedactPatterns:   hackyAutoRedactPatterns,
 	}
+	pe.commandProcessor.LogArgs = true
+	pe.commandProcessor.Meta = pe
+	pe.commandProcessor.PreValidator = commands.AnyPreValidator[*PolicyEvaluator]{
+		commands.ValidatePrefixCommand[*PolicyEvaluator](pe.Bot.UserID.String()),
+		commands.ValidatePrefixCommand[*PolicyEvaluator]("!meowlnir"),
+		commands.ValidatePrefixSubstring[*PolicyEvaluator]("!"),
+	}
+	pe.commandProcessor.Register(
+		cmdJoin,
+		cmdKnock,
+		cmdLeave,
+		cmdPowerLevel,
+		cmdRedact,
+		cmdRedactRecent,
+		cmdKick,
+		cmdBan,
+		cmdRemovePolicy,
+		cmdAddUnban,
+		cmdMatch,
+		cmdSearch,
+		cmdSendAsBot,
+		cmdRooms,
+		cmdProtectRoom,
+		cmdHelp,
+	)
 	return pe
 }
 
 func (pe *PolicyEvaluator) sendNotice(ctx context.Context, message string, args ...any) {
 	pe.Bot.SendNotice(ctx, pe.ManagementRoom, message, args...)
-}
-
-func (pe *PolicyEvaluator) sendSuccessReaction(ctx context.Context, eventID id.EventID) {
-	_, err := pe.Bot.SendReaction(ctx, pe.ManagementRoom, eventID, "✅")
-	if err != nil {
-		zerolog.Ctx(ctx).Err(err).Msg("Failed to send reaction to confirm successful handling of command")
-	}
 }
 
 func (pe *PolicyEvaluator) Load(ctx context.Context) {

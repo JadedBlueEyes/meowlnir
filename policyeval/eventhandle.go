@@ -113,6 +113,8 @@ func removeActionString(rec event.PolicyRecommendation) string {
 	}
 }
 
+func noopSendNotice(_ context.Context, _ string, _ ...any) {}
+
 func (pe *PolicyEvaluator) HandlePolicyListChange(ctx context.Context, policyRoom id.RoomID, added, removed *policylist.Policy) {
 	policyRoomMeta := pe.GetWatchedListMeta(policyRoom)
 	if policyRoomMeta == nil {
@@ -124,21 +126,25 @@ func (pe *PolicyEvaluator) HandlePolicyListChange(ctx context.Context, policyRoo
 		Any("removed", removed).
 		Msg("Policy list change")
 	removedAndAddedAreEquivalent := removed != nil && added != nil && removed.EntityOrHash() == added.EntityOrHash() && removed.Recommendation == added.Recommendation
+	sendNotice := pe.sendNotice
+	if policyRoomMeta.DontNotifyOnChange {
+		sendNotice = noopSendNotice
+	}
 	if removedAndAddedAreEquivalent {
 		if removed.Reason == added.Reason {
-			pe.sendNotice(ctx,
+			sendNotice(ctx,
 				"[%s] [%s](%s) re-%s `%s` for `%s`",
 				policyRoomMeta.Name, added.Sender, added.Sender.URI().MatrixToURL(),
 				addActionString(added.Recommendation), added.EntityOrHash(), added.Reason)
 		} else {
-			pe.sendNotice(ctx,
+			sendNotice(ctx,
 				"[%s] [%s](%s) changed the %s reason for `%s` from `%s` to `%s`",
 				policyRoomMeta.Name, added.Sender, added.Sender.URI().MatrixToURL(),
 				changeActionString(added.Recommendation), added.EntityOrHash(), removed.Reason, added.Reason)
 		}
 	} else {
 		if removed != nil {
-			pe.sendNotice(ctx,
+			sendNotice(ctx,
 				"[%s] [%s](%s) %s %ss matching `%s` for `%s`",
 				policyRoomMeta.Name, removed.Sender, removed.Sender.URI().MatrixToURL(),
 				removeActionString(removed.Recommendation), removed.EntityType, removed.EntityOrHash(), removed.Reason,
@@ -152,7 +158,7 @@ func (pe *PolicyEvaluator) HandlePolicyListChange(ctx context.Context, policyRoo
 			if added.Ignored {
 				suffix = " (rule was ignored)"
 			}
-			pe.sendNotice(ctx,
+			sendNotice(ctx,
 				"[%s] [%s](%s) %s %ss matching `%s` for `%s`%s",
 				policyRoomMeta.Name, added.Sender, added.Sender.URI().MatrixToURL(),
 				addActionString(added.Recommendation), added.EntityType, added.EntityOrHash(), added.Reason,
