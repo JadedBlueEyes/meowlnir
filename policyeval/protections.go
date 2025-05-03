@@ -76,18 +76,20 @@ type eventWithMentions struct {
 }
 
 func MentionProtectionCallback(ctx context.Context, client *mautrix.Client, evt *event.Event, p *config.MaxMentionsProtection) {
-	if p.MaxMentions <= 0 {
-		return
-	}
 	protectionLog := zerolog.Ctx(ctx).With().
 		Str("protection", "max_mentions").
 		Stringer("room", evt.RoomID).
 		Stringer("event", evt.ID).
 		Stringer("sender", evt.Sender).
 		Logger()
+	if p.MaxMentions <= 0 {
+		protectionLog.Trace().Msg("protection disabled")
+		return
+	}
 	content, ok := evt.Content.Parsed.(*eventWithMentions)
 	if !ok || content.Mentions == nil || len(content.Mentions.UserIDs) == 0 {
 		// No intentional mentions here, nothing to check
+		protectionLog.Trace().Msg("no mentions in message")
 		return
 	}
 	userMentions := len(content.Mentions.UserIDs)
