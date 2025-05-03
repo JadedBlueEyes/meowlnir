@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"go.mau.fi/meowlnir/config"
 
@@ -65,6 +66,56 @@ func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *e
 			protectionLog.Err(err).Msg("Failed to redact message")
 		} else {
 			protectionLog.Info().Msg("Redacted message")
+		}
+	}
+}
+
+type eventWithMentions struct {
+	Mentions *event.Mentions `json:"m.mentions"`
+}
+
+func MentionProtectionCallback(ctx context.Context, client *mautrix.Client, evt *event.Event, p *config.MaxMentionsProtection) {
+	if p.MaxMentions <= 0 {
+		return
+	}
+	protectionLog := zerolog.Ctx(ctx).With().
+		Str("protection", "max_mentions").
+		Stringer("room", evt.RoomID).
+		Stringer("event", evt.ID).
+		Stringer("sender", evt.Sender).
+		Logger()
+	content, ok := evt.Content.Parsed.(*eventWithMentions)
+	if !ok || content.Mentions == nil || len(content.Mentions.UserIDs) == 0 {
+		// No intentional mentions here, nothing to check
+		return
+	}
+	userMentions := len(content.Mentions.UserIDs)
+	powerLevels, err := client.StateStore.GetPowerLevels(ctx, evt.RoomID)
+	if err != nil {
+		protectionLog.Warn().Err(err).Msg("Failed to get power levels!")
+	}
+	if p.UserCanBypass(evt.Sender, powerLevels) {
+		return
+	}
+
+	// TODO: ban instead of redact(?)
+	if p.Period <= 0 {
+		// Only check the event itself
+		if userMentions >= p.MaxMentions {
+			if _, err := client.RedactEvent(ctx, evt.RoomID, evt.ID); err != nil {
+				protectionLog.Err(err).Msg("Failed to redact message")
+			} else {
+				protectionLog.Info().Msg("Redacted message")
+			}
+		}
+	} else {
+		u := p.IncrementUser(evt.Sender, userMentions)
+		if u.Hits >= p.MaxMentions && time.Now().Before(u.Expires) {
+			if _, err := client.RedactEvent(ctx, evt.RoomID, evt.ID); err != nil {
+				protectionLog.Err(err).Msg("Failed to redact message")
+			} else {
+				protectionLog.Info().Msg("Redacted message")
+			}
 		}
 	}
 }

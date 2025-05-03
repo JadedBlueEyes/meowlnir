@@ -3,6 +3,7 @@ package config
 import (
 	"reflect"
 	"slices"
+	"time"
 
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -42,8 +43,10 @@ type StateProtectionsEventContent struct {
 }
 
 type Protections struct {
-	NoMedia            NoMediaProtection `json:"no_media"`
-	IgnoreAfterSeconds int64             `json:"ignore_after_seconds"`
+	NoMedia     NoMediaProtection     `json:"no_media"`
+	MaxMentions MaxMentionsProtection `json:"max_mentions"`
+	//IgnoreAfterSeconds int64                 `json:"ignore_after_seconds"`
+	// ^ TODO: globally ignore people after a certain time, or after a certain number of messages
 }
 
 // TODO: perhaps some union type for UserCanBypass for common fields like enabled, ignorehomeservers, ignoreabovepl
@@ -52,10 +55,13 @@ type Protections struct {
 // Might be worth using an interface to define some common fields and functions for HandleMessage & co to call.
 // Should also hopefully prevent an ugly if/else or switch/match statement chain
 
-type IProtection interface {
-	UserCanBypass(id.UserID, *event.PowerLevelsEventContent) bool
-}
-
+// NoMediaProtection will automatically redact the messages if they have a message type not contained in AllowedTypes.
+// Enabled - whether the protection is enabled
+// IgnoreHomeServers - a list of homeservers to ignore for this protection
+// IgnoreAbovePowerLevel - a power level above which to ignore this protection (gt, not gte)
+// AllowedTypes - a list of message types to allow. If nil, defaults to ["m.text", "m.notice", "m.emote"]
+// AllowInlineImages - whether to allow inline images in messages, like emojis.
+// AllowCustomReactions - whether to allow custom emoji reactions to messages.
 type NoMediaProtection struct {
 	Enabled               bool      `json:"enabled"`
 	IgnoreHomeServers     []string  `json:"ignore_home_servers"`
@@ -66,6 +72,67 @@ type NoMediaProtection struct {
 }
 
 func (p *NoMediaProtection) UserCanBypass(userID id.UserID, powerLevels *event.PowerLevelsEventContent) bool {
+	if len(p.IgnoreHomeServers) > 0 && slices.Contains(p.IgnoreHomeServers, userID.Homeserver()) {
+		return true
+	}
+	if powerLevels != nil {
+		userPL, ok := powerLevels.Users[userID]
+		if !ok {
+			userPL = powerLevels.UsersDefault
+		}
+		if p.IgnoreAbovePowerLevel != nil && int64(userPL) > *p.IgnoreAbovePowerLevel {
+			return true
+		}
+	}
+	return false
+}
+
+type MentionCounter struct {
+	Hits    int
+	Expires time.Time
+}
+
+// MaxMentionsProtection will automatically redact the messages if the number of mentions exceeds the configured limit
+// Enabled - whether the protection is enabled
+// MaxMentions - the maximum number of mentions allowed in a message, or in the given period.
+// Period - the time period in seconds to count mentions. Set to 0 to only count per-message.
+type MaxMentionsProtection struct {
+	Enabled               bool     `json:"enabled"`
+	MaxMentions           int      `json:"max_mentions"`
+	Period                int      `json:"period"`
+	IgnoreAbovePowerLevel *int64   `json:"ignore_power_level_above"`
+	IgnoreHomeServers     []string `json:"ignore_home_servers"`
+
+	users map[id.UserID]*MentionCounter
+}
+
+// GetUser fetches the mention counter for a user, deleting it if it is expired
+func (p *MaxMentionsProtection) GetUser(user id.UserID) *MentionCounter {
+	if p.users == nil {
+		p.users = make(map[id.UserID]*MentionCounter)
+	}
+	userCounter, ok := p.users[user]
+	if ok {
+		if time.Now().After(userCounter.Expires) {
+			delete(p.users, user)
+			userCounter = nil
+		}
+	}
+	return userCounter
+}
+
+// IncrementUser increments the mention counter for a user by n, creating it if it doesn't exist
+func (p *MaxMentionsProtection) IncrementUser(user id.UserID, n int) *MentionCounter {
+	c := p.GetUser(user)
+	if c == nil {
+		c = &MentionCounter{Hits: 0, Expires: time.Now().Add(time.Duration(p.Period) * time.Second)}
+	}
+	c.Hits += n
+	p.users[user] = c
+	return c
+}
+
+func (p *MaxMentionsProtection) UserCanBypass(userID id.UserID, powerLevels *event.PowerLevelsEventContent) bool {
 	if len(p.IgnoreHomeServers) > 0 && slices.Contains(p.IgnoreHomeServers, userID.Homeserver()) {
 		return true
 	}

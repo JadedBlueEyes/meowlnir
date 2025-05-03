@@ -48,6 +48,9 @@ func (pe *PolicyEvaluator) HandleMessage(ctx context.Context, evt *event.Event) 
 		if cfg.NoMedia.Enabled {
 			MediaProtectionCallback(ctx, pe.Bot.Client, evt, &cfg.NoMedia)
 		}
+		if cfg.MaxMentions.Enabled {
+			MentionProtectionCallback(ctx, pe.Bot.Client, evt, &cfg.MaxMentions)
+		}
 	}
 }
 
