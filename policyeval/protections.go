@@ -26,6 +26,7 @@ func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *e
 		protectionLog.Warn().Err(err).Msg("Failed to get power levels!")
 	}
 	if p.UserCanBypass(evt.Sender, powerLevels) {
+		protectionLog.Trace().Msg("sender can bypass protection")
 		return
 	}
 
@@ -90,11 +91,13 @@ func MentionProtectionCallback(ctx context.Context, client *mautrix.Client, evt 
 		return
 	}
 	userMentions := len(content.Mentions.UserIDs)
+	protectionLog.Trace().Int("mentions", userMentions).Msg("sender sent mentions")
 	powerLevels, err := client.StateStore.GetPowerLevels(ctx, evt.RoomID)
 	if err != nil {
 		protectionLog.Warn().Err(err).Msg("Failed to get power levels!")
 	}
 	if p.UserCanBypass(evt.Sender, powerLevels) {
+		protectionLog.Trace().Msg("sender can bypass protection")
 		return
 	}
 
@@ -110,6 +113,11 @@ func MentionProtectionCallback(ctx context.Context, client *mautrix.Client, evt 
 		}
 	} else {
 		u := p.IncrementUser(evt.Sender, userMentions)
+		protectionLog.Trace().
+			Int("mentions", u.Hits).
+			Int("max", p.MaxMentions).
+			Time("expires", u.Expires).
+			Msg("sender has sent total mentions")
 		if u.Hits >= p.MaxMentions && time.Now().Before(u.Expires) {
 			if _, err := client.RedactEvent(ctx, evt.RoomID, evt.ID); err != nil {
 				protectionLog.Err(err).Msg("Failed to redact message")
