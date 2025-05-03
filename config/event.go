@@ -57,12 +57,12 @@ type IProtection interface {
 }
 
 type NoMediaProtection struct {
-	Enabled               bool     `json:"enabled"`
-	IgnoreHomeServers     []string `json:"ignore_home_servers"`
-	IgnoreAbovePowerLevel *int64   `json:"ignore_power_level_above"`
-	AllowedTypes          []string `json:"allowed_types"`
-	AllowInlineImages     bool     `json:"allow_inline_images"`
-	AllowCustomReactions  bool     `json:"allow_custom_reactions"`
+	Enabled               bool      `json:"enabled"`
+	IgnoreHomeServers     []string  `json:"ignore_home_servers"`
+	IgnoreAbovePowerLevel *int64    `json:"ignore_power_level_above"`
+	AllowedTypes          *[]string `json:"allowed_types"`
+	AllowInlineImages     bool      `json:"allow_inline_images"`
+	AllowCustomReactions  bool      `json:"allow_custom_reactions"`
 }
 
 func (p *NoMediaProtection) UserCanBypass(userID id.UserID, powerLevels *event.PowerLevelsEventContent) bool {
