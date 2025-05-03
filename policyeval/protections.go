@@ -28,6 +28,7 @@ func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *e
 		protectionLog.Trace().Msg("User can bypass media protection")
 		return
 	}
+	protectionLog.Debug().Msg("Checking if message should be redacted")
 
 	shouldRedact := false
 
@@ -67,8 +68,6 @@ func MediaProtectionCallback(ctx context.Context, client *mautrix.Client, evt *e
 		protectionLog.Trace().Msg("Message is allowed")
 	}
 }
-
-// TODO: Link protection callback
 
 func (pe *PolicyEvaluator) handleProtections(
 	evt *event.Event,
