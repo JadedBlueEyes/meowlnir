@@ -2,6 +2,7 @@ package policyeval
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"time"
@@ -86,13 +87,27 @@ func MentionProtectionCallback(ctx context.Context, client *mautrix.Client, evt 
 		protectionLog.Trace().Msg("protection disabled")
 		return
 	}
-	content, ok := evt.Content.Parsed.(*eventWithMentions)
-	if !ok || content.Mentions == nil || len(content.Mentions.UserIDs) == 0 {
-		// No intentional mentions here, nothing to check
-		protectionLog.Trace().Msg("no mentions in message")
-		return
+	userMentions := 0
+	if evt.Content.Parsed != nil {
+		content, ok := evt.Content.Parsed.(*eventWithMentions)
+		if !ok {
+			// No intentional mentions here, nothing to check
+			protectionLog.Trace().Msg("could not parse event to check for mentions")
+			return
+		}
+		if content.Mentions != nil {
+			userMentions = len(content.Mentions.UserIDs)
+		}
+	} else {
+		var content eventWithMentions
+		if err := json.Unmarshal(evt.Content.VeryRaw, &content); err != nil {
+			protectionLog.Trace().Err(err).Msg("failed to parse event to check for mentions")
+			return
+		}
+		if content.Mentions != nil {
+			userMentions = len(content.Mentions.UserIDs)
+		}
 	}
-	userMentions := len(content.Mentions.UserIDs)
 	protectionLog.Trace().Int("mentions", userMentions).Msg("sender sent mentions")
 	powerLevels, err := client.StateStore.GetPowerLevels(ctx, evt.RoomID)
 	if err != nil {
