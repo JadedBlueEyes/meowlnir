@@ -23,9 +23,8 @@ func (pe *PolicyEvaluator) CompileACL() (*event.ServerACLEventContent, time.Dura
 
 		AllowIPLiterals: false,
 	}
-	botServer := pe.Bot.UserID.Homeserver()
 	for entity, policy := range rules {
-		if policy.Pattern.Match(botServer) {
+		if policy.Pattern.Match(pe.Bot.ServerName) {
 			continue
 		}
 		if policy.Recommendation != event.PolicyRecommendationUnban {
@@ -34,6 +33,33 @@ func (pe *PolicyEvaluator) CompileACL() (*event.ServerACLEventContent, time.Dura
 	}
 	slices.Sort(acl.Deny)
 	return &acl, time.Since(start)
+}
+
+func (pe *PolicyEvaluator) DeferredUpdateACL() {
+	select {
+	case pe.aclDeferChan <- struct{}{}:
+	default:
+	}
+}
+
+const aclDeferTime = 15 * time.Second
+
+func (pe *PolicyEvaluator) aclDeferLoop() {
+	ctx := pe.Bot.Log.With().
+		Str("action", "deferred acl update").
+		Stringer("management_room", pe.ManagementRoom).
+		Logger().
+		WithContext(context.Background())
+	after := time.NewTimer(aclDeferTime)
+	after.Stop()
+	for {
+		select {
+		case <-pe.aclDeferChan:
+			after.Reset(aclDeferTime)
+		case <-after.C:
+			pe.UpdateACL(ctx)
+		}
+	}
 }
 
 func (pe *PolicyEvaluator) UpdateACL(ctx context.Context) {

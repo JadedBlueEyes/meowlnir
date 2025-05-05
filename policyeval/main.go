@@ -49,6 +49,8 @@ type PolicyEvaluator struct {
 	configLock sync.Mutex
 	aclLock    sync.Mutex
 
+	aclDeferChan chan struct{}
+
 	claimProtected       func(roomID id.RoomID, eval *PolicyEvaluator, claim bool) *PolicyEvaluator
 	protectedRoomsEvent  *config.ProtectedRoomsEventContent
 	protectedRooms       map[id.RoomID]*protectedRoomMeta
@@ -94,6 +96,7 @@ func NewPolicyEvaluator(
 		protectedRooms:       make(map[id.RoomID]*protectedRoomMeta),
 		wantToProtect:        make(map[id.RoomID]struct{}),
 		isJoining:            make(map[id.RoomID]struct{}),
+		aclDeferChan:         make(chan struct{}, 1),
 		claimProtected:       claimProtected,
 		pendingInvites:       make(map[pendingInvite]struct{}),
 		createPuppetClient:   createPuppetClient,
@@ -123,10 +126,13 @@ func NewPolicyEvaluator(
 		cmdMatch,
 		cmdSearch,
 		cmdSendAsBot,
+		cmdSuspend,
+		cmdDeactivate,
 		cmdRooms,
 		cmdProtectRoom,
 		cmdHelp,
 	)
+	go pe.aclDeferLoop()
 	return pe
 }
 

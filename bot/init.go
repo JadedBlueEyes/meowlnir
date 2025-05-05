@@ -14,6 +14,7 @@ import (
 	"maunium.net/go/mautrix/crypto"
 	"maunium.net/go/mautrix/crypto/cryptohelper"
 	"maunium.net/go/mautrix/id"
+	"maunium.net/go/mautrix/synapseadmin"
 
 	"go.mau.fi/meowlnir/database"
 )
@@ -22,12 +23,12 @@ type Bot struct {
 	Meta *database.Bot
 	Log  zerolog.Logger
 	*mautrix.Client
-	Intent *appservice.IntentAPI
-
-	CryptoStore  *crypto.SQLCryptoStore
-	CryptoHelper *cryptohelper.CryptoHelper
-	Mach         *crypto.OlmMachine
-
+	Intent         *appservice.IntentAPI
+	SynapseAdmin   *synapseadmin.Client
+	ServerName     string
+	CryptoStore    *crypto.SQLCryptoStore
+	CryptoHelper   *cryptohelper.CryptoHelper
+	Mach           *crypto.OlmMachine
 	eventProcessor *appservice.EventProcessor
 	mainDB         *database.Database
 }
@@ -60,14 +61,14 @@ func NewBot(
 		client.Crypto = helper
 	}
 	return &Bot{
-		Meta:   bot,
-		Client: client,
-		Intent: intent,
-		Log:    log,
-
-		CryptoStore:  cryptoStore,
-		CryptoHelper: helper,
-
+		Meta:           bot,
+		Client:         client,
+		Intent:         intent,
+		Log:            log,
+		SynapseAdmin:   &synapseadmin.Client{Client: client},
+		ServerName:     client.UserID.Homeserver(),
+		CryptoStore:    cryptoStore,
+		CryptoHelper:   helper,
 		eventProcessor: ep,
 		mainDB:         db,
 	}
