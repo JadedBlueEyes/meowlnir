@@ -39,13 +39,13 @@ type ProtectedRoomsEventContent struct {
 }
 
 type StateProtectionsEventContent struct {
-	Global    Protections               `json:"global"`
-	Overrides map[id.RoomID]Protections `json:"overrides"`
+	Global    *Protections               `json:"global"`
+	Overrides map[id.RoomID]*Protections `json:"overrides"`
 }
 
 type Protections struct {
-	NoMedia     NoMediaProtection     `json:"no_media"`
-	MaxMentions MaxMentionsProtection `json:"max_mentions"`
+	NoMedia     NoMediaProtection      `json:"no_media"`
+	MaxMentions *MaxMentionsProtection `json:"max_mentions"`
 	//IgnoreAfterSeconds int64                 `json:"ignore_after_seconds"`
 	// ^ TODO: globally ignore people after a certain time, or after a certain number of messages
 }
@@ -89,8 +89,10 @@ func (p *NoMediaProtection) UserCanBypass(userID id.UserID, powerLevels *event.P
 }
 
 type MentionCounter struct {
-	Hits    int
-	Expires time.Time
+	Hits        int
+	Infractions int
+	Expires     time.Time
+	Start       time.Time
 }
 
 // MaxMentionsProtection will automatically redact the messages if the number of mentions exceeds the configured limit
@@ -100,11 +102,11 @@ type MentionCounter struct {
 type MaxMentionsProtection struct {
 	Enabled               bool     `json:"enabled"`
 	MaxMentions           int      `json:"max_mentions"`
+	MaxInfractions        *int     `json:"max_infractions"`
 	Period                int      `json:"period"`
 	IgnoreAbovePowerLevel *int64   `json:"ignore_power_level_above"`
 	IgnoreHomeServers     []string `json:"ignore_home_servers"`
-
-	users map[id.UserID]*MentionCounter
+	users                 map[id.UserID]*MentionCounter
 }
 
 // GetUser fetches the mention counter for a user, deleting it if it is expired
@@ -126,9 +128,22 @@ func (p *MaxMentionsProtection) GetUser(user id.UserID) *MentionCounter {
 func (p *MaxMentionsProtection) IncrementUser(user id.UserID, n int) *MentionCounter {
 	c := p.GetUser(user)
 	if c == nil {
-		c = &MentionCounter{Hits: 0, Expires: time.Now().Add(time.Duration(p.Period) * time.Second)}
+		c = &MentionCounter{Hits: 0, Expires: time.Now().Add(time.Duration(p.Period) * time.Second), Start: time.Now()}
 	}
 	c.Hits += n
+	p.users[user] = c
+	return c
+}
+
+// IncrementInfractions increments the infractions for a user by 1, creating it if it doesn't exist
+func (p *MaxMentionsProtection) IncrementInfractions(user id.UserID) *MentionCounter {
+	c := p.GetUser(user)
+	if c == nil {
+		c = &MentionCounter{Hits: 0, Expires: time.Now().Add(time.Duration(p.Period) * time.Second), Start: time.Now()}
+	}
+	if p.MaxInfractions != nil {
+		c.Infractions += 1
+	}
 	p.users[user] = c
 	return c
 }

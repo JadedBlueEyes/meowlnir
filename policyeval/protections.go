@@ -76,7 +76,7 @@ type eventWithMentions struct {
 	Mentions *event.Mentions `json:"m.mentions"`
 }
 
-func MentionProtectionCallback(ctx context.Context, client *mautrix.Client, evt *event.Event, p *config.MaxMentionsProtection) {
+func MentionProtectionCallback(ctx context.Context, pe *PolicyEvaluator, evt *event.Event, p *config.MaxMentionsProtection) {
 	protectionLog := zerolog.Ctx(ctx).With().
 		Str("protection", "max_mentions").
 		Stringer("room", evt.RoomID).
@@ -97,7 +97,7 @@ func MentionProtectionCallback(ctx context.Context, client *mautrix.Client, evt 
 		userMentions = len(content.Mentions.UserIDs)
 	}
 	protectionLog.Trace().Int("mentions", userMentions).Msg("sender sent mentions")
-	powerLevels, err := client.StateStore.GetPowerLevels(ctx, evt.RoomID)
+	powerLevels, err := pe.Bot.Client.StateStore.GetPowerLevels(ctx, evt.RoomID)
 	if err != nil {
 		protectionLog.Warn().Err(err).Msg("Failed to get power levels!")
 	}
@@ -106,11 +106,10 @@ func MentionProtectionCallback(ctx context.Context, client *mautrix.Client, evt 
 		return
 	}
 
-	// TODO: ban instead of redact(?)
 	if p.Period <= 0 {
 		// Only check the event itself
 		if userMentions >= p.MaxMentions {
-			if _, err := client.RedactEvent(ctx, evt.RoomID, evt.ID); err != nil {
+			if _, err := pe.Bot.Client.RedactEvent(ctx, evt.RoomID, evt.ID); err != nil {
 				protectionLog.Err(err).Msg("Failed to redact message")
 			} else {
 				protectionLog.Info().Msg("Redacted message")
@@ -124,10 +123,41 @@ func MentionProtectionCallback(ctx context.Context, client *mautrix.Client, evt 
 			Time("expires", u.Expires).
 			Msg("sender has sent total mentions")
 		if u.Hits >= p.MaxMentions && time.Now().Before(u.Expires) {
-			if _, err := client.RedactEvent(ctx, evt.RoomID, evt.ID); err != nil {
+			u = p.IncrementInfractions(evt.Sender)
+			pe.sendNotice(ctx,
+				"User [%s](%s) has sent too many mentions (%d in the past %s) in room [%s](%s) - redacting their [message](%s).",
+				evt.Sender,
+				evt.Sender.URI().MatrixToURL(),
+				u.Hits,
+				time.Since(u.Start),
+				evt.RoomID,
+				evt.RoomID.URI().MatrixToURL(),
+				evt.RoomID.EventURI(evt.ID).MatrixToURL())
+			if _, err := pe.Bot.Client.RedactEvent(ctx, evt.RoomID, evt.ID); err != nil {
 				protectionLog.Err(err).Msg("Failed to redact message")
 			} else {
 				protectionLog.Info().Msg("Redacted message")
+			}
+		}
+		if p.MaxInfractions != nil && u.Infractions >= *p.MaxInfractions {
+			pe.sendNotice(ctx,
+				"User [%s](%s) has reached the max infractions for mentions in room [%s](%s) - banning them.",
+				evt.Sender,
+				evt.Sender.URI().MatrixToURL(),
+				evt.RoomID,
+				evt.RoomID.URI().MatrixToURL())
+			_, banErr := pe.Bot.Client.BanUser(ctx, evt.RoomID, &mautrix.ReqBanUser{UserID: evt.Sender, Reason: "too many mentions"})
+			if banErr != nil {
+				protectionLog.Err(banErr).Msg("Failed to ban user")
+				pe.sendNotice(ctx,
+					"Failed to ban user [%s](%s) in room [%s](%s): %v",
+					evt.Sender,
+					evt.Sender.URI().MatrixToURL(),
+					evt.RoomID,
+					evt.RoomID.URI().MatrixToURL(),
+					banErr)
+			} else {
+				protectionLog.Info().Msg("Banned user")
 			}
 		}
 	}

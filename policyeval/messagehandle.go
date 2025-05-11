@@ -43,10 +43,12 @@ func (pe *PolicyEvaluator) HandleMessage(ctx context.Context, evt *event.Event) 
 
 	if pe.protections != nil {
 		cfg := pe.protections.Global
-		override, hasOverride := pe.protections.Overrides[evt.RoomID]
-		if hasOverride {
-			cfg = override
-			zerolog.Ctx(ctx).Trace().Msg("room has override")
+		if pe.protections.Overrides != nil {
+			override, hasOverride := pe.protections.Overrides[evt.RoomID]
+			if hasOverride {
+				cfg = override
+				zerolog.Ctx(ctx).Trace().Msg("room has override")
+			}
 		}
 		if cfg.NoMedia.Enabled {
 			zerolog.Ctx(ctx).Trace().Msg("calling media protection callback")
@@ -54,7 +56,7 @@ func (pe *PolicyEvaluator) HandleMessage(ctx context.Context, evt *event.Event) 
 		}
 		if cfg.MaxMentions.Enabled {
 			zerolog.Ctx(ctx).Trace().Msg("calling mention protection callback")
-			MentionProtectionCallback(ctx, pe.Bot.Client, evt, &cfg.MaxMentions)
+			MentionProtectionCallback(ctx, pe, evt, cfg.MaxMentions)
 		}
 	}
 }
