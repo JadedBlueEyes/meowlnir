@@ -1,9 +1,16 @@
 package config
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
 	"reflect"
 	"slices"
+	"sync"
 	"time"
+
+	"maunium.net/go/mautrix"
 
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -44,8 +51,9 @@ type StateProtectionsEventContent struct {
 }
 
 type Protections struct {
-	NoMedia     NoMediaProtection      `json:"no_media"`
-	MaxMentions *MaxMentionsProtection `json:"max_mentions"`
+	NoMedia     NoMediaProtection             `json:"no_media"`
+	MaxMentions *MaxMentionsProtection        `json:"max_mentions"`
+	RegReqs     *ServerRequirementsProtection `json:"server_requirements"`
 	//IgnoreAfterSeconds int64                 `json:"ignore_after_seconds"`
 	// ^ TODO: globally ignore people after a certain time, or after a certain number of messages
 }
@@ -162,6 +170,128 @@ func (p *MaxMentionsProtection) UserCanBypass(userID id.UserID, powerLevels *eve
 		}
 	}
 	return false
+}
+
+type ServerRequirementsProtection struct {
+	Enabled                  bool `json:"enabled"`
+	RequireCaptcha           bool `json:"require_captcha"`
+	RequireEmail             bool `json:"require_email"`
+	RequirePhone             bool `json:"require_phone"`
+	RequireRegistrationToken bool `json:"require_registration_token"`
+	RequireExternalAuth      bool `json:"require_external_auth"`
+
+	cache map[string]bool
+	lock  sync.Mutex
+}
+
+func (p *ServerRequirementsProtection) getServer(name string) *bool {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if p.cache == nil {
+		p.cache = make(map[string]bool)
+	}
+	pass, ok := p.cache[name]
+	if ok {
+		return &pass
+	}
+	return nil
+}
+
+func (p *ServerRequirementsProtection) setServer(name string, pass bool) *bool {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if p.cache == nil {
+		p.cache = make(map[string]bool)
+	}
+	p.cache[name] = pass
+	time.AfterFunc(time.Hour*12, func() { p.popServer(name) })
+	return &pass
+}
+
+func (p *ServerRequirementsProtection) popServer(name string) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if p.cache == nil {
+		p.cache = make(map[string]bool)
+	}
+	delete(p.cache, name)
+}
+
+func (p *ServerRequirementsProtection) MeetsRequirements(reqs *mautrix.RespUserInteractive) bool {
+	if reqs == nil || len(reqs.Flows) == 0 {
+		// There are no requirements, so we can skip this check
+		return false
+	}
+
+	// Only the first flow matters
+	flow := reqs.Flows[0]
+	if len(flow.Stages) == 0 {
+		// No stages, so we can skip this check
+		// This would be weird, there should be at least `m.login.dummy`, but whatever
+		return false
+	}
+	if p.RequireCaptcha && !slices.Contains(flow.Stages, "m.login.recaptcha") {
+		return false
+	}
+	if p.RequireEmail && !slices.Contains(flow.Stages, "m.login.email.identity") {
+		return false
+	}
+	if p.RequirePhone && !slices.Contains(flow.Stages, "m.login.msisdn") {
+		return false
+	}
+	if p.RequireRegistrationToken && !slices.Contains(flow.Stages, "m.login.registration_token") {
+		return false
+	}
+	return true
+}
+
+func (p *ServerRequirementsProtection) CheckServer(ctx context.Context, name string) (*bool, error) {
+	pass := p.getServer(name)
+	if pass != nil {
+		return pass, nil
+	}
+
+	discover, err := mautrix.DiscoverClientAPI(ctx, name)
+	var baseUrl string
+	if err != nil {
+		return nil, err
+	}
+	if discover == nil || discover.Homeserver.BaseURL == "" {
+		baseUrl = "https://" + name
+	} else {
+		baseUrl = discover.Homeserver.BaseURL
+	}
+	client, err := mautrix.NewClient(baseUrl, "", "")
+	if err != nil {
+		return nil, err
+	}
+
+	if p.RequireExternalAuth {
+		_, err = client.MakeRequest(ctx, http.MethodGet, client.BuildClientURL("unstable", "org.matrix.msc2965", "auth_metadata"), nil, nil)
+		if err != nil {
+			if errors.Is(err, mautrix.MUnrecognized) {
+				// Server does not support external auth
+				return p.setServer(name, false), nil
+			}
+			return nil, fmt.Errorf("failed to check external auth: %w", err)
+		}
+		// Server supports external auth, so we can skip the rest of the checks
+		return p.setServer(name, true), nil
+	}
+
+	_, uiaa, err := client.Register(ctx, &mautrix.ReqRegister{})
+	if err != nil {
+		if errors.Is(err, mautrix.MForbidden) {
+			// Server is not accepting registrations, automatically fulfill the requirements
+			return p.setServer(name, true), nil
+		}
+		return nil, err
+	}
+	isOkay := false
+	if uiaa != nil {
+		isOkay = p.MeetsRequirements(uiaa)
+	}
+	return p.setServer(name, isOkay), nil
 }
 
 func init() {

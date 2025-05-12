@@ -77,6 +77,20 @@ func (pe *PolicyEvaluator) HandleMember(ctx context.Context, evt *event.Event) {
 		if checkRules {
 			pe.EvaluateUser(ctx, userID, false)
 		}
+		if pe.protections != nil {
+			cfg := pe.protections.Global
+			if pe.protections.Overrides != nil {
+				override, hasOverride := pe.protections.Overrides[evt.RoomID]
+				if hasOverride {
+					cfg = override
+					zerolog.Ctx(ctx).Trace().Msg("room has override")
+				}
+			}
+			if cfg.RegReqs != nil && cfg.RegReqs.Enabled {
+				zerolog.Ctx(ctx).Trace().Msg("calling server requirements protection callback")
+				ServerRequirementsProtectionCallback(ctx, pe, evt, cfg.RegReqs)
+			}
+		}
 	}
 }
 
