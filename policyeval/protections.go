@@ -171,9 +171,9 @@ func ServerRequirementsProtectionCallback(ctx context.Context, pe *PolicyEvaluat
 		Stringer("event", evt.ID).
 		Stringer("sender", evt.Sender).
 		Logger()
-	permitted, err := p.CheckServer(ctx, evt.Sender.Homeserver())
+	permitted, missing, err := p.CheckServer(ctx, evt.Sender.Homeserver())
 	if err != nil {
-		protectionLog.Warn().Err(err).Msg("Failed to check server")
+		protectionLog.Warn().Err(err).Str("missing", *missing).Msg("Failed to check server")
 		pe.sendNotice(
 			ctx,
 			"Failed to check server `%s` for user [%s](%s) in room [%s](%s): %v",
@@ -184,10 +184,11 @@ func ServerRequirementsProtectionCallback(ctx context.Context, pe *PolicyEvaluat
 		protectionLog.Warn().Msg("Server has not passed requirements!")
 		pe.sendNotice(
 			ctx,
-			"Server `%s` does not meet the registration requirements of room [%s](%s) - kicking [%s](%s).",
+			"Server `%s` does not meet the registration requirements of room [%s](%s), missing: %s. kicking [%s](%s).",
 			evt.Sender.Homeserver(),
 			evt.RoomID,
 			evt.RoomID.URI().MatrixToURL(),
+			*missing,
 			evt.Sender,
 			evt.Sender.URI().MatrixToURL())
 		if _, err := pe.Bot.Client.KickUser(ctx, evt.RoomID, &mautrix.ReqKickUser{

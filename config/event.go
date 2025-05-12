@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"go.mau.fi/util/ptr"
+
 	"maunium.net/go/mautrix"
 
 	"maunium.net/go/mautrix/event"
@@ -217,10 +219,10 @@ func (p *ServerRequirementsProtection) popServer(name string) {
 	delete(p.cache, name)
 }
 
-func (p *ServerRequirementsProtection) MeetsRequirements(reqs *mautrix.RespUserInteractive) bool {
+func (p *ServerRequirementsProtection) MeetsRequirements(reqs *mautrix.RespUserInteractive) (bool, string) {
 	if reqs == nil || len(reqs.Flows) == 0 {
 		// There are no requirements, so we can skip this check
-		return false
+		return false, "any flows"
 	}
 
 	// Only the first flow matters
@@ -228,33 +230,33 @@ func (p *ServerRequirementsProtection) MeetsRequirements(reqs *mautrix.RespUserI
 	if len(flow.Stages) == 0 {
 		// No stages, so we can skip this check
 		// This would be weird, there should be at least `m.login.dummy`, but whatever
-		return false
+		return false, "any stages"
 	}
 	if p.RequireCaptcha && !slices.Contains(flow.Stages, "m.login.recaptcha") {
-		return false
+		return false, "captcha"
 	}
 	if p.RequireEmail && !slices.Contains(flow.Stages, "m.login.email.identity") {
-		return false
+		return false, "email"
 	}
 	if p.RequirePhone && !slices.Contains(flow.Stages, "m.login.msisdn") {
-		return false
+		return false, "phone"
 	}
 	if p.RequireRegistrationToken && !slices.Contains(flow.Stages, "m.login.registration_token") {
-		return false
+		return false, "token"
 	}
-	return true
+	return true, ""
 }
 
-func (p *ServerRequirementsProtection) CheckServer(ctx context.Context, name string) (*bool, error) {
+func (p *ServerRequirementsProtection) CheckServer(ctx context.Context, name string) (*bool, *string, error) {
 	pass := p.getServer(name)
 	if pass != nil {
-		return pass, nil
+		return pass, nil, nil
 	}
 
 	discover, err := mautrix.DiscoverClientAPI(ctx, name)
 	var baseUrl string
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if discover == nil || discover.Homeserver.BaseURL == "" {
 		baseUrl = "https://" + name
@@ -263,7 +265,7 @@ func (p *ServerRequirementsProtection) CheckServer(ctx context.Context, name str
 	}
 	client, err := mautrix.NewClient(baseUrl, "", "")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if p.RequireExternalAuth {
@@ -271,27 +273,29 @@ func (p *ServerRequirementsProtection) CheckServer(ctx context.Context, name str
 		if err != nil {
 			if errors.Is(err, mautrix.MUnrecognized) {
 				// Server does not support external auth
-				return p.setServer(name, false), nil
+				return p.setServer(name, false), ptr.Ptr("external auth"), nil
 			}
-			return nil, fmt.Errorf("failed to check external auth: %w", err)
+			return nil, nil, fmt.Errorf("failed to check external auth: %w", err)
 		}
 		// Server supports external auth, so we can skip the rest of the checks
-		return p.setServer(name, true), nil
+		return p.setServer(name, true), nil, nil
 	}
 
 	_, uiaa, err := client.Register(ctx, &mautrix.ReqRegister{})
 	if err != nil {
 		if errors.Is(err, mautrix.MForbidden) {
 			// Server is not accepting registrations, automatically fulfill the requirements
-			return p.setServer(name, true), nil
+			return p.setServer(name, true), nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	isOkay := false
+	var missing *string = nil
 	if uiaa != nil {
-		isOkay = p.MeetsRequirements(uiaa)
+		a, b := p.MeetsRequirements(uiaa)
+		isOkay, missing = a, &b
 	}
-	return p.setServer(name, isOkay), nil
+	return p.setServer(name, isOkay), missing, nil
 }
 
 func init() {
