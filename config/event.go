@@ -146,13 +146,13 @@ func (p *MaxMentionsProtection) IncrementUser(user id.UserID, n int) *MentionCou
 }
 
 // IncrementInfractions increments the infractions for a user by 1, creating it if it doesn't exist
-func (p *MaxMentionsProtection) IncrementInfractions(user id.UserID) *MentionCounter {
+func (p *MaxMentionsProtection) IncrementInfractions(user id.UserID, n int) *MentionCounter {
 	c := p.GetUser(user)
 	if c == nil {
 		c = &MentionCounter{Hits: 0, Expires: time.Now().Add(time.Duration(p.Period) * time.Second), Start: time.Now()}
 	}
 	if p.MaxInfractions != nil {
-		c.Infractions += 1
+		c.Infractions += n
 	}
 	p.users[user] = c
 	return c
